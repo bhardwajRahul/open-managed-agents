@@ -1,3 +1,4 @@
+import type { SessionEventView } from "@open-managed-agents/domain/sessions";
 import type {
   SendableSessionEvent,
   SendSessionEventsCommand,
@@ -20,10 +21,9 @@ import type {
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
 
-export async function sessionInputIdentityPrefix(workspaceId: string, sessionId: string, key: string): Promise<string> {
-  const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify([workspaceId, sessionId, key])));
-  return `sevt_req_${Array.from(new Uint8Array(bytes), byte => byte.toString(16).padStart(2, "0")).join("")}_`;
-}
+import { sessionInputIdentityPrefix } from "@openma/common/protocol/managed";
+export { sessionInputIdentityPrefix };
+
 function inputPayload(event: SentSessionEvent): string {
   const { id: _id, processedAt: _time, ...body } = event;
   if ("outcomeId" in body) delete (body as {outcomeId?: string}).outcomeId;
@@ -189,7 +189,18 @@ export class SessionEventsApplicationService
       });
       if (execution === null) return { type: "not_found" };
       if (prefix !== null) {
-        const previous = await this.dependencies.store.list({ workspaceId: this.dependencies.workspaceId, sessionId: command.sessionId, idPrefix: prefix, limit: events.length + 1, order: "asc" });
+        // Check complete event IDs, including the next batch position so a
+        // shorter retry cannot silently accept a previously longer batch.
+        const eventIds = [...events.map(event => event.id), `${prefix}${events.length}`];
+        const previous: SessionEventView[] = [];
+        // Keep bound parameters below D1's limit even for large input batches.
+        for (let offset = 0; offset < eventIds.length; offset += 64) {
+          const ids = eventIds.slice(offset, offset + 64);
+          previous.push(...await this.dependencies.store.list({
+            workspaceId: this.dependencies.workspaceId, sessionId: command.sessionId,
+            eventIds: ids, limit: ids.length, order: "asc",
+          }));
+        }
         if (previous.length > 0) {
           const byId = new Map(previous.map(event => [event.id, event]));
           if (previous.length !== events.length || events.some(event => !byId.has(event.id) || inputPayload(byId.get(event.id)! as SentSessionEvent) !== inputPayload(event))) {

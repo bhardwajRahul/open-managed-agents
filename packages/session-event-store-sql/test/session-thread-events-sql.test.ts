@@ -30,6 +30,22 @@ describe("SqlSessionEventStore thread reader", () => {
     await client.exec(SCHEMA_SQL);
   });
 
+  it("looks up native event IDs exactly within the session and workspace", async () => {
+    const event: SessionEventView = { id: "sevt_%_!a0", type: "user.message",
+      content: [{ type: "text", text: "once" }], processedAt: "2026-08-26T01:00:00.000Z" };
+    for (const id of [event.id, `${event.id}extra`, event.id.toUpperCase()]) {
+      await client.prepare("INSERT INTO managed_session_events VALUES (?, ?, ?, ?, ?, ?, ?)")
+        .bind("workspace_01", "session_01", null, id, event.type, JSON.stringify({ ...event, id }), Date.parse(event.processedAt!)).run();
+    }
+    const store = new SqlSessionEventStore(client);
+    const query = { workspaceId: "workspace_01", sessionId: "session_01", eventIds: [event.id], limit: 10, order: "asc" as const };
+    await expect(store.list(query)).resolves.toEqual([event]);
+    await expect(store.list({ ...query, eventIds: [] })).resolves.toEqual([]);
+    await expect(store.list({ ...query, eventIds: ["sevt_%_!a"] })).resolves.toEqual([]);
+    await expect(store.list({ ...query, workspaceId: "workspace_other" })).resolves.toEqual([]);
+    await expect(store.list({ ...query, sessionId: "session_other" })).resolves.toEqual([]);
+  });
+
   it("uses the stored thread relation even when it is absent from the event document", async () => {
     const linked: SessionEventView = {
       id: "event_01",

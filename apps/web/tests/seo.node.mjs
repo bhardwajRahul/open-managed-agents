@@ -99,8 +99,9 @@ test("high-impression landing pages emit concise, user-facing search snippets", 
   assert.match(title, /Claude Managed Agents/);
   assert.match(title, /OpenAI Agents API/);
   assert.ok(title.length <= 65, "homepage title stays concise");
-  assert.match(description, /Self-host/);
-  assert.match(description, /OpenAI.*Node/);
+  assert.match(description, /Open Managed Agents/);
+  assert.match(description, /OpenAI Agents API.*Node/);
+  assert.match(homepage, /<h1[^>]*>\s*Open Managed Agents\s*<\/h1>/);
   assert.ok(description.length <= 170, "homepage description stays concise");
   assert.equal(homepage.match(/<meta property="og:description" content="([^"]+)"/)?.[1], description);
   assert.match(homepage, /href="#openai-agents-api"/);

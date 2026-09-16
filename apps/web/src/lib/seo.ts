@@ -47,7 +47,7 @@ export function organizationSchema() {
     // we register it (or any other social account), append the URL here.
     sameAs: [REPO_URL],
     description:
-      "Open Managed Agents makes open-source software for running AI agents on your own infrastructure, using the Claude and OpenAI SDKs.",
+      "Open Managed Agents makes open-source software for running AI agents on your own infrastructure, with Claude Managed Agents and OpenAI Agents API support.",
   };
 }
 
@@ -58,7 +58,7 @@ export function websiteSchema() {
     name: ORG_NAME,
     url: SITE_URL,
     description:
-      "Run Claude and OpenAI agents on your own server with OpenMA. Find deployment guides, SDK examples and ways to connect your tools.",
+      "Open Managed Agents: self-host Claude and OpenAI agents. Find SDK examples, OpenAI Agents API compatibility details and deployment guides.",
   };
 }
 
@@ -91,10 +91,10 @@ export function softwareApplicationSchema() {
       "Claude Tag-style Slack publication",
       "MCP server hosting",
       "Vault-backed credentials",
-      "Cloudflare Workers and Docker self-hosting",
+      "Local and cloud agent execution",
     ],
     description:
-      "Run agents on your own server with the Claude and OpenAI SDKs. OpenMA handles sessions, tools and recovery. Bring your own model keys and connect the files and services your agents need.",
+      "Open Managed Agents supports Claude Managed Agents and OpenAI Agents API. Run agents with the SDKs you know, with sessions, tools and recovery. OpenAI Agents API requires Node.",
     sameAs: [REPO_URL],
   };
 }

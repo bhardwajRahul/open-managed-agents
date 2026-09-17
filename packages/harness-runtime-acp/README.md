@@ -9,18 +9,95 @@ does not claim Environment Work, acquire compute, publish workspace/output
 candidates, or implement durable storage. Those authorities remain outside the
 sandbox in `@open-managed-agents/managed-runtime-host`.
 
-## Preinstalled runner
+## Versioned harness releases
 
-Install `@open-managed-agents/harness-runtime-acp` in a Node-capable runtime
-image and use `openma-acp-supervisor` as the `openma_supervised` process. The
-runner reads the official Environment Work scope and secret from
-`ANTHROPIC_ENVIRONMENT_ID`, `ANTHROPIC_SESSION_ID`, `ANTHROPIC_WORK_ID`, and
-`ANTHROPIC_WORK_SECRET`. The selected harness id is an installed ACP agent id
-(for example `codex-acp` or `pi-acp`).
+The environment image supplies Node, npm and `openma-acp-supervisor`. Harness
+software is prepared after sandbox allocation, independently of that image.
+Select a published release in the existing Runtime Profile:
 
-Applications that need a custom installed-agent resolver can compose the same
-production path through `createNodeManagedAcpSupervisorApp()` from
-`@open-managed-agents/harness-runtime-acp/node-supervisor`.
+```ts
+const driver = {
+  type: "openma_supervised",
+  protocol: "openma-harness-supervisor-v1",
+  supervisor: { command: "openma-acp-supervisor" },
+  harness: { id: "codex-acp", version: "1.8.0" },
+  readyTimeoutMs: 660_000, // allow first-install time before ready
+  heartbeatTimeoutMs: 30_000,
+  drainTimeoutMs: 5_000,
+};
+```
+
+`codex-acp` resolves to `@agentclientprotocol/codex-acp` by default. Other
+published selections resolve through the official ACP Registry, including its
+history for older versions. The shared `@openma/common/acp-artifacts` layer
+selects a compatible binary, npx or uvx distribution and verifies its release
+identity and artifact integrity before making it launchable. There is no
+fallback to another version or a PATH executable when preparation fails.
+
+Operators can replace the default registry/catalog with `OPENMA_ACP_SOURCES`:
+
+```json
+{
+  "codex-acp": { "type": "npm", "package": "@agentclientprotocol/codex-acp" },
+  "python-agent": { "type": "uvx", "package": "python-agent", "command": "agent", "python": "3.12" },
+  "goose": { "type": "registry" },
+  "custom": { "type": "registry", "manifestUrl": "https://releases.example/{version}/agent.json" }
+}
+```
+
+The explicit catalog is an allowlist; `{}` disables all published releases.
+`OPENMA_ACP_PACKAGES` remains an alias for existing npm package-string catalogs,
+and cannot be combined with `OPENMA_ACP_SOURCES`. Release versions belong to
+the published metadata, not the catalog. Registry sources optionally specify
+`preference: ["uvx", "npx", "binary"]`; the default is binary → npx → uvx.
+Registry arguments and environment are preserved, with Work credentials scrubbed
+before the ACP child starts. Custom manifest URLs accept `{id}` and `{version}`
+placeholders and must return an ACP manifest with the matching identity.
+
+Binary preparation supports raw executables, zip, tar, tar.gz/tgz, tar.bz2/tbz2,
+and tar.xz/txz. It validates paths and checksums before publishing an executable.
+If an old Registry entry omits its checksum, the first HTTPS download's content
+hash is pinned in the Session record. uvx uses an isolated, relocatable virtual
+environment with the selected PyPI release's hashes. Both console entry points
+and wheel-packaged executables are supported.
+
+The supervisor validates Work scope and credentials before preparation. It
+persists the resolved manifest under
+`/workspace/.openma/harness-releases/<session-id>.json`, so workspace snapshots
+carry it to replacement sandboxes. Restores use that manifest without resolving
+registry metadata again; native checkpoints also bind its digest. Changing a
+Session's source, version or artifact is rejected: create a new Session.
+Artifact cache defaults to `/tmp/openma-acp-artifacts`; set
+`OPENMA_ACP_ARTIFACT_ROOT` to use another sandbox-local cache. It is partitioned
+by platform and language runtime, and fully prepared artifacts work offline.
+
+The environment needs npm for npm sources; uv and a compatible Python interpreter
+for uvx; and bzip2/xz for those binary formats. Provision Python with
+`uv python install` if needed. A cold sandbox needs registry/artifact network
+access, and first preparation must fit within `readyTimeoutMs`. OS libraries
+remain part of the environment. These preparation paths target POSIX sandboxes.
+The digest pins the top-level artifact; identical transitive dependency trees
+across independently prepared sandboxes need bundled or locked releases.
+
+`openma-acp-work-item` uses the same path with `OPENMA_HARNESS_ID=codex-acp`
+and `OPENMA_HARNESS_VERSION=1.8.0`. The supervisor protocol version is independent
+of the harness release. The runner reads `ANTHROPIC_ENVIRONMENT_ID`,
+`ANTHROPIC_SESSION_ID`, `ANTHROPIC_WORK_ID`, and `ANTHROPIC_WORK_SECRET` from
+its outer worker. Installer subprocesses do not inherit these credentials.
+
+## Existing preinstalled integrations
+
+Existing operators may retain `OPENMA_ACP_HARNESSES`, a JSON inventory of
+`{ id, version, command, args? }` with absolute executable paths. This mode
+selects only installed entries; it cannot be combined with `OPENMA_ACP_SOURCES`, `OPENMA_ACP_PACKAGES`
+or custom agent overrides. It is an operator declaration, not artifact
+verification. Without an explicit catalog, legacy `version: "1"` still resolves
+preinstalled agents; it does not pin their software version. New integrations
+should select a published release as above.
+
+Custom integrations may compose `createNodeManagedAcpSupervisorApp()` from
+`@open-managed-agents/harness-runtime-acp/node-supervisor`. The Console does not
+yet provide a selector for this Runtime Profile lane.
 
 ## Ownership boundary
 
@@ -78,3 +155,32 @@ are never replayed.
 coverage. The Node Runtime Host Docker lane additionally tests a new container
 restoring a prior native Codex Session, ACP resume, cache-usage projection,
 output publication and zero leaked containers.
+
+### Cloudflare live artifact certification
+
+With Wrangler authenticated, Docker running, and a working Codex login at
+`~/.codex/auth.json`, run from the repository root:
+
+```sh
+OMA_CLOUDFLARE_LIVE_CERTIFICATION=1 \
+OMA_CLOUDFLARE_HARNESS_CERTIFICATION=1 \
+pnpm --filter @open-managed-agents/managed-runtime-cloudflare exec vitest run \
+  test/cloudflare.live.test.ts --config vitest.config.ts
+```
+
+To use an existing image without rebuilding and pushing it, set
+`OMA_CLOUDFLARE_CERTIFICATION_IMAGE` to its fully qualified, pinned registry
+reference (the default Dockerfile currently only wraps the published sandbox base).
+
+This creates an isolated Cloudflare Worker/container, uploads the current bundled
+probe at runtime, and prepares uv 0.10.9 (binary), Ruff 0.11.0 (uvx), and
+codex-acp 1.8.0 (npm). It checks cached preparation without artifact network access,
+a real model response, and a second response after restarting the ACP process
+and resuming its native session. It also exercises the provider's persistence,
+lease, outbound proxy, revocation and destruction checks. This tests Cloudflare
+runtime → shared artifact preparation → ACP → model, not the hosted control-plane
+API or the supervisor Work protocol. The Codex credential is copied only into the
+temporary test container and removed in `finally`; the suite deletes its Worker
+and container resources. Set `OMA_CLOUDFLARE_HARNESS_REPORT` to an absolute path to
+save the non-secret result JSON. R2 checkpoint certification remains a separate
+opt-in requiring the R2 fixture credentials.

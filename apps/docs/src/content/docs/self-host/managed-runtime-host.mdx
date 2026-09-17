@@ -210,6 +210,30 @@ scope-escape rejection and force-stop. Its reusable core is
 | `ama_worker` | Managed Agents control plane | Any official/community `EnvironmentWorker` command or image | Started unchanged; it keeps its Work lease through the official API |
 | `openma_supervised` | Pi, ACP, or another OpenMA harness in the sandbox | Implements `openma-harness-supervisor-v1` | Ready, heartbeat, completion, drain, bounded stop |
 
+For the ACP supervisor, `driver.harness` selects a published release, for
+example `{ id: "codex-acp", version: "1.8.0" }`. The generic supervisor uses
+`@openma/common/acp-artifacts` to prepare npm, uvx or platform-specific binary
+distributions after sandbox allocation. The selected harness is not baked into
+the environment image. Allow first-install time in `readyTimeoutMs` (for example
+660,000 ms), and provide registry/artifact network access for cold sandboxes.
+
+`codex-acp` defaults to its npm package; other ids use the official ACP Registry,
+including exact historical releases. `OPENMA_ACP_SOURCES` can restrict the
+catalog to npm package sources, uvx package/interpreter/command sources, or ACP
+registry manifests. `OPENMA_ACP_PACKAGES` remains compatible with existing npm
+catalogs. Binary → npx → uvx is the default distribution preference; registry
+entries can override it. Binary formats include raw, zip and tar with gzip,
+bzip2 or xz compression. The environment provides the corresponding language
+runtimes and decompression tools.
+
+The Session's resolved manifest travels with workspace snapshots, and native
+checkpoints bind its digest. A different release requires a new Session.
+Arguments and environment from the registry are preserved while Work secrets
+are removed before launching the agent. Transitive dependencies require bundled
+or locked releases for full reproducibility. Existing preinstalled inventories
+(`OPENMA_ACP_HARNESSES`) and legacy unpinned `version: "1"` remain supported.
+The protocol remains `openma-harness-supervisor-v1`.
+
 Both lanes use the same sandbox, workspace, output, and resource-fence Ports.
 The supervisor protocol is never required for an ordinary Managed Agents
 worker. In the `ama_worker` lane, the official worker inside the sandbox owns

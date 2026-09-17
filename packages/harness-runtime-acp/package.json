@@ -63,7 +63,7 @@
     "@open-managed-agents/managed-runtime-host": "workspace:*",
     "@open-managed-agents/runtime-resource-contract": "workspace:*",
     "@open-managed-agents/runtime": "workspace:*",
-    "@openma/common": "git+https://github.com/openma-ai/openma-common.git#e196bdcac3d5f3165d6833c2531d4255a51620e9",
+    "@openma/common": "git+https://github.com/openma-ai/openma-common.git#4d9bb469d3af8ade05d020a9b65bae2bd978101d",
     "fflate": "^0.8.2"
   },
   "devDependencies": {

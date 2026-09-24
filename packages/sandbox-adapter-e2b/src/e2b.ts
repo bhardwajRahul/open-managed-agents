@@ -92,6 +92,8 @@ export interface E2BSandboxOptions {
   sandboxUrl?: string;
   /** Optional E2B-compatible base domain. Falls back to E2B_DOMAIN. */
   domain?: string;
+  /** Metadata passed only when creating a sandbox. */
+  createMetadata?: Record<string, string>;
   /**
    * Template id (the `template` field in E2B's UI). Default "base" matches
    * the SDK's default — has python/node/git/curl etc preinstalled. Override
@@ -248,9 +250,9 @@ export class E2BSandboxExecutor
 
   async exec(command: string, timeout?: number): Promise<string> {
     const wrapped = this.applyEnv(command);
-    const result = (await this.sandbox.commands.run(wrapped, {
+    const result = await settleCommand(this.sandbox.commands.run(wrapped, {
       timeoutMs: timeout ?? this.defaultTimeoutMs,
-    })) as E2BCommandResult;
+    }) as Promise<E2BCommandResult>);
     // Match @cloudflare/sandbox's behaviour: combined stdout+stderr,
     // newline-trimmed, plus an exit-code suffix.
     const separator = result.stdout.length > 0 && !result.stdout.endsWith("\n") ? "\n" : "";
@@ -646,7 +648,7 @@ class E2BProcessHandle implements ProcessHandle {
   constructor(public id: string, private handle: E2BCommandHandle) {
     this.pid = handle.pid;
     if (handle.wait) {
-      this.waitPromise = handle.wait().then((r) => {
+      this.waitPromise = settleCommand(handle.wait()).then((r) => {
         this.finalResult = r;
         this.stdout = r.stdout;
         this.stderr = r.stderr;
@@ -681,6 +683,27 @@ function shellEscape(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
+/**
+ * The official SDK rejects a finished command with CommandExitError (which
+ * implements CommandResult) whenever the exit code is non-zero. A non-zero
+ * exit is an ordinary outcome for SandboxPort callers, so fold it back into a
+ * result; anything else (transport, auth, timeout) stays an error.
+ */
+async function settleCommand(pending: Promise<E2BCommandResult>): Promise<E2BCommandResult> {
+  try {
+    return await pending;
+  } catch (cause) {
+    const exitCode = readExitCode(cause);
+    if (exitCode === null) throw cause;
+    const failed = cause as { stdout?: unknown; stderr?: unknown };
+    return {
+      exitCode,
+      stdout: typeof failed.stdout === "string" ? failed.stdout : "",
+      stderr: typeof failed.stderr === "string" ? failed.stderr : "",
+    };
+  }
+}
+
 function readExitCode(cause: unknown): number | null {
   if (
     typeof cause === "object"
@@ -701,6 +724,7 @@ type E2BConnectionOptions = Pick<
 >;
 
 type E2BCreateOptions = E2BConnectionOptions & {
+  metadata?: Record<string, string>;
   lifecycle: {
     onTimeout: { action: "pause"; keepMemory: true };
     autoResume: true;
@@ -732,9 +756,10 @@ function connectionOptions(opts: E2BConnectionOptions): E2BConnectionOptions {
   };
 }
 
-function creationOptions(opts: E2BConnectionOptions): E2BCreateOptions {
+function creationOptions(opts: E2BSandboxOptions): E2BCreateOptions {
   return {
     ...connectionOptions(opts),
+    ...(opts.createMetadata === undefined ? {} : { metadata: opts.createMetadata }),
     // ACP keeps a live JSON-RPC process in the sandbox. Killing the sandbox
     // at the end of its lease loses that process and forces a cold restore;
     // a memory pause preserves it and E2B resumes it transparently on the
@@ -746,12 +771,32 @@ function creationOptions(opts: E2BConnectionOptions): E2BCreateOptions {
   };
 }
 
+function parseCreateMetadata(value: string | undefined): Record<string, string> | undefined {
+  if (value === undefined || value.trim() === "") return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error("E2B_CREATE_METADATA must be valid JSON");
+  }
+  if (
+    typeof parsed !== "object"
+    || parsed === null
+    || Array.isArray(parsed)
+    || Object.values(parsed).some((item) => typeof item !== "string")
+  ) {
+    throw new Error("E2B_CREATE_METADATA must be a JSON object with string values");
+  }
+  return parsed as Record<string, string>;
+}
+
 function optionsFromFactory(env: SandboxFactoryEnv): E2BSandboxOptions {
   return {
     apiKey: env.E2B_API_KEY,
     apiUrl: env.E2B_API_URL,
     sandboxUrl: env.E2B_SANDBOX_URL,
     domain: env.E2B_DOMAIN,
+    createMetadata: parseCreateMetadata(env.E2B_CREATE_METADATA),
     templateId: env.SANDBOX_IMAGE,
     memoryBucket: readS3MemoryBucket(env),
   };
